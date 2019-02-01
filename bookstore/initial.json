@@ -1,0 +1,42 @@
+{
+    "authors": [
+	    "Dennis Ritchie",
+	    "Brian Kernighan",
+	    "Balachander Krishnamurthy",
+	    "Jennifer Rexford",
+	    "Erich Gamma",
+	    "Richard Helm",
+	    "Ralph Johnson",
+	    "John Vlissides",
+	    "Bjarne Stroustrup",
+	    "Alan Donovan",
+	    "Edsger Dijkstra",
+	    "C.A.R. Hoare"
+    ],
+    "books": [
+	    "The C Programming Language",
+	    "Practical Reusable UNIX Software",
+	    "Web Protocols and Practice: HTTP/1.1, Networking Protocols, Caching, and Traffic Measurement",
+	    "Design Patterns: Elements of Reusable Object-Oriented Software",
+	    "Pattern Hatching: Design Patterns Applied",
+	    "The C++ Programming Language",
+	    "The Go Programming Language",
+	    "A Discipline of Programming",
+	    "Structured Programming",
+	    "Communicating Sequential Processes"
+    ],
+    "map": [
+	    [1, 2],
+	    [1, 7],
+	    [2, 3],
+	    [3],
+	    [4],
+	    [4],
+	    [4],
+	    [4, 5],
+	    [6],
+	    [7],
+	    [8, 9],
+	    [9, 10]
+    ]	    
+}
