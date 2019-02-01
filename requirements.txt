@@ -1,3 +1,4 @@
+aiopg
 pytest
 sanic
 sanic-openapi
