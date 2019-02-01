@@ -1,0 +1,6 @@
+pytest
+sanic
+sanic-openapi
+sqlalchemy
+json-logging-py
+

@@ -1,0 +1,7 @@
+[run]
+branch = True
+source = bookstore
+omit = site-packages
+
+[html]
+directory = coverage
