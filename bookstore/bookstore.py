@@ -47,18 +47,18 @@ books_table = sa.Table(
                 sa.Column('name', sa.String(128)),
              )
 
-class Author(Base):
-    __tablename__ = 'author'
-    id = sa.Column(sa.Integer, primary_key=True)
-    name = sa.Column(sa.String(32))
-    books = sa.orm.relationship('Book', secondary=mapping_table, back_populates='authors')
-
-
-class Book(Base):
-    __tablename__ = 'book'
-    id = sa.Column(sa.Integer, primary_key=True)
-    name = sa.Column(sa.String(128))
-    authors = sa.orm.relationship('Author', secondary=mapping_table, back_populates='books')
+# class Author(Base):
+#     __tablename__ = 'author'
+#     id = sa.Column(sa.Integer, primary_key=True)
+#     name = sa.Column(sa.String(32))
+#     books = sa.orm.relationship('Book', secondary=mapping_table, back_populates='authors')
+# 
+# 
+# class Book(Base):
+#     __tablename__ = 'book'
+#     id = sa.Column(sa.Integer, primary_key=True)
+#     name = sa.Column(sa.String(128))
+#     authors = sa.orm.relationship('Author', secondary=mapping_table, back_populates='books')
 
 
 app = Sanic(__name__)
@@ -91,9 +91,9 @@ async def default(request):
 async def prepare_db(app, loop):
     async with create_engine(connection) as engine:
         async with engine.acquire() as conn:
+            await conn.execute('DROP TABLE IF EXISTS author_book_rel')
             await conn.execute('DROP TABLE IF EXISTS author')
             await conn.execute('DROP TABLE IF EXISTS book')
-            await conn.execute('DROP TABLE IF EXISTS author_book_rel')
             await conn.execute("""CREATE TABLE author (
                                    id serial primary key,
                                    name varchar(32)
@@ -103,8 +103,10 @@ async def prepare_db(app, loop):
                                    name varchar(128)
                                );
                                CREATE TABLE author_book_rel (
-                                   author_id integer not null,
-                                   book_id integer not null
+                                   author_id INTEGER REFERENCES author(id)
+                                             ON DELETE CASCADE ON UPDATE CASCADE,
+                                   book_id INTEGER REFERENCES book(id) 
+                                           ON DELETE CASCADE ON UPDATE CASCADE
                                );""")
             with open('bookstore/initial.json', 'r') as fixture:
                 data = json.loads(fixture.read())
