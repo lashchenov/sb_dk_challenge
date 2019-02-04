@@ -11,6 +11,8 @@ from sqlalchemy.ext.declarative import declarative_base
 
 from aiopg.sa import create_engine
 
+from psycopg2 import IntegrityError
+
 from sanic import Sanic
 from sanic.response import json as jsonify
 from sanic_openapi import swagger_blueprint, openapi_blueprint, doc
@@ -74,17 +76,84 @@ app.blueprint(health)
 
 
 
-@app.route("/")
-async def default(request):
-    async with create_engine(connection) as engine:
-        async with engine.acquire() as conn:
-            books = []
-            async for book in conn.execute(books_table.select()):
-                books.append(book.name)
-            authors = []
-            async for author in conn.execute(authors_table.select()):
-                authors.append(author.name)
-            return jsonify({'result': {'authors': authors, 'books': books}})    
+# @app.route("/")
+# async def default(request):
+#     async with create_engine(connection) as engine:
+#         async with engine.acquire() as conn:
+#             books = []
+#             async for book in conn.execute(books_table.select()):
+#                 books.append(book.name)
+#             authors = []
+#             async for author in conn.execute(authors_table.select(authors_table.c.name.startswith('B'))):
+#                 authors.append(author.name)
+#             return jsonify({'result': {'authors': authors, 'books': books}})    
+
+class CRUDFactory:
+    """As long as both tables have the same column set
+    it is possible to design a universal CRUD factory.
+    :table: sqlalchemy.schema.Table 
+    :slug: an acceptable by sanic.route('/path') decorator
+    Sanic instance should be declared globally.
+    """
+    def __init__(self, table, slug):
+        self.table = table
+        self.slug = slug
+        app.route(slug, methods=["POST"])(self.create)
+        app.route(os.path.join(slug, '<db_id:int>'), methods=["GET",])(self.read)
+        app.route(slug, methods=["GET"])(self.read)
+        app.route(os.path.join(slug, '<db_id:int>'), methods=["PUT", "PATCH"])(self.update)
+        app.route(os.path.join(slug, '<db_id:int>'), methods=["DELETE"])(self.delete)
+
+    async def create(self, request):
+        async with create_engine(connection) as engine:
+            async with engine.acquire() as conn:
+                result = await conn.execute(self.table.insert().values(name=request.json['name']))
+                row = await result.fetchall() 
+                try:
+                    return jsonify({'id': row[0]['id']})
+                except Exception as e:
+                    return jsonify({'error': str(e)})
+
+    async def read(self, request, db_id=False):
+        async with create_engine(connection) as engine:
+            async with engine.acquire() as conn:
+                if not db_id:
+                    rows = []
+                    async for row in conn.execute(self.table.select()):
+                        rows.append({'id': row.id, 'name': row.name})
+                    return jsonify({'result': rows})    
+                else:
+                    row = await conn.execute(self.table.select(self.table.c.id == db_id))
+                    result = await row.fetchall()
+                    try:
+                        row_id, name = result[0]['id'], result[0]['name']
+                        return jsonify({'result': {'id': row_id, 'name': name}})
+                    except IndexError:
+                        return jsonify({'error': 'No matching record was found.'})
+    
+    async def update(self, request, db_id):
+        async with create_engine(connection) as engine:
+            async with engine.acquire() as conn:
+                try:
+                    row = await conn.execute(
+                        self.table.update().values(**request.json).where(self.table.c.id == db_id)
+                    )
+                    result = row.rowcount
+                    return jsonify({'result': 'Success' if result else 'No matching record found.'})
+                except IntegrityError:
+                    return jsonify({'error': 'The supplied ID violates unique constraint.'})
+
+    
+    async def delete(self, request, db_id):
+        async with create_engine(connection) as engine:
+            async with engine.acquire() as conn:
+                result = await conn.execute(self.table.delete().where(self.table.c.id == db_id))
+                return jsonify({'result': 'Success' if result.rowcount else 'No matching record found.'})
+
+
+
+CRUDFactory(authors_table, '/authors')
+CRUDFactory(books_table, '/books')
 
 
 @app.listener('before_server_start')
