@@ -1,4 +1,6 @@
 import json
+import random
+import string
 
 from sanic.testing import SanicTestClient
 
@@ -39,6 +41,35 @@ async def test_nonexisting_authors_deletion(sanic_tester: SanicTestClient):
     assert response.status == 404
 
 
+async def test_authors_creation_and_fetch(sanic_tester: SanicTestClient):
+    name = ''.join([random.choice(string.ascii_lowercase) for i in range(16)])
+    response = await sanic_tester.post("/authors", data=json.dumps({'name': name}))
+    resp_json = await response.json()
+    author = await sanic_tester.get("/authors/{}".format(resp_json['id']))
+    author_json = await author.json()
+    assert author_json['result']['name'] == name
+
+
+async def test_authors_book_count(sanic_tester: SanicTestClient):
+    book_count = {
+            1: 2, 2: 2, 3: 2,
+            4: 1, 5: 1, 6: 1,
+            7: 1, 8: 2, 9: 1,
+            10: 1, 11: 2, 12: 2
+    }
+    for i in book_count:
+        response = await sanic_tester.get('/authors/relcount/{}'.format(str(i)))
+        resp_json = await response.json()
+        assert resp_json['result'] == book_count[i]
+
+
+async def test_authors_fetch_books(sanic_tester: SanicTestClient):
+    author_ids = {2: {1, 7}, 8: {4, 5}, 12: {9, 10}}
+    for i in author_ids:
+        response = await sanic_tester.get('/authors/rellist/{}'.format(str(i)))
+        resp_json = await response.json()
+        assert {b['id'] for b in resp_json['result']} == author_ids[i]
+
 async def test_books(sanic_tester: SanicTestClient):
     response = await sanic_tester.get("/books")
     resp_json = await response.json()
@@ -73,4 +104,32 @@ async def test_nonexisting_books_update(sanic_tester: SanicTestClient):
 async def test_nonexisting_books_deletion(sanic_tester: SanicTestClient):
     response = await sanic_tester.delete("/books/123")
     assert response.status == 404
+
+
+async def test_books_creation_and_fetch(sanic_tester: SanicTestClient):
+    name = ''.join([random.choice(string.ascii_lowercase) for i in range(16)])
+    response = await sanic_tester.post("/books", data=json.dumps({'name': name}))
+    resp_json = await response.json()
+    book = await sanic_tester.get("/books/{}".format(resp_json['id']))
+    book_json = await book.json()
+    assert book_json['result']['name'] == name
+
+
+async def test_books_author_count(sanic_tester: SanicTestClient):
+    author_count = {
+            1: 2, 2: 2, 3: 2, 4: 4, 5: 1,
+            6: 1, 7: 2, 8: 1, 9: 2, 10: 1
+    }
+    for i in author_count:
+        response = await sanic_tester.get('/books/relcount/{}'.format(str(i)))
+        resp_json = await response.json()
+        assert resp_json['result'] == author_count[i]
+
+
+async def test_books_fetch_authors(sanic_tester: SanicTestClient):
+    book_ids = {4: {5, 6, 7, 8}, 7: {2, 10}, 10: {12}}
+    for i in book_ids:
+        response = await sanic_tester.get('/books/rellist/{}'.format(str(i)))
+        resp_json = await response.json()
+        assert {a['id'] for a in resp_json['result']} == book_ids[i]
 
