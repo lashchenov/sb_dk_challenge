@@ -15,6 +15,7 @@ RUN mkdir -p /sanic/bookstore
 
 COPY config/* /sanic/config/
 COPY bookstore/ /sanic/bookstore/
+COPY tests/ /sanic/tests/
 COPY requirements.txt /sanic
 COPY run.py /sanic/run.py
 COPY .env /sanic/.env

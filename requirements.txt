@@ -1,5 +1,5 @@
 aiopg
-pytest
+pytest-sanic
 sanic
 sanic-openapi
 sqlalchemy

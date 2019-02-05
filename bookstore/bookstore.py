@@ -116,7 +116,7 @@ class CRUDFactory:
                 result = await conn.execute(self.table.insert().values(name=request.json['name']))
                 row = await result.fetchall() 
                 try:
-                    return jsonify({'id': row[0]['id']})
+                    return jsonify({'id': row[0]['id']}, status=201)
                 except Exception as e:
                     return jsonify({'error': str(e)})
 
@@ -135,7 +135,7 @@ class CRUDFactory:
                         row_id, name = result[0]['id'], result[0]['name']
                         return jsonify({'result': {'id': row_id, 'name': name}})
                     except IndexError:
-                        return jsonify({'error': 'No matching record was found.'})
+                        return jsonify({'error': 'No matching record was found.'}, status=404)
     
     async def update(self, request, db_id):
         async with create_engine(connection) as engine:
@@ -145,16 +145,22 @@ class CRUDFactory:
                         self.table.update().values(**request.json).where(self.table.c.id == db_id)
                     )
                     result = row.rowcount
-                    return jsonify({'result': 'Success' if result else 'No matching record found.'})
+                    return jsonify(
+                            {'result': 'Success' if result else 'No matching record found.'},
+                            status=200 if result else 404
+                    )
                 except IntegrityError:
-                    return jsonify({'error': 'The supplied ID violates unique constraint.'})
+                    return jsonify({'error': 'The supplied ID violates unique constraint.'}, status=400)
 
     
     async def delete(self, request, db_id):
         async with create_engine(connection) as engine:
             async with engine.acquire() as conn:
                 result = await conn.execute(self.table.delete().where(self.table.c.id == db_id))
-                return jsonify({'result': 'Success' if result.rowcount else 'No matching record found.'})
+                return jsonify(
+                        {'result': 'Success' if result.rowcount else 'No matching record found.'},
+                        status=200 if result.rowcount else 404
+                )
 
 
     async def count_related(self, request, db_id):
