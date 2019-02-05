@@ -88,6 +88,7 @@ app.blueprint(health)
 #                 authors.append(author.name)
 #             return jsonify({'result': {'authors': authors, 'books': books}})    
 
+
 class CRUDFactory:
     """As long as both tables have the same column set
     it is possible to design a universal CRUD factory.
@@ -95,14 +96,19 @@ class CRUDFactory:
     :slug: an acceptable by sanic.route('/path') decorator
     Sanic instance should be declared globally.
     """
-    def __init__(self, table, slug):
+    def __init__(self, table, slug, related=False):
         self.table = table
         self.slug = slug
+
+        self.related = related
+
         app.route(slug, methods=["POST"])(self.create)
         app.route(os.path.join(slug, '<db_id:int>'), methods=["GET",])(self.read)
         app.route(slug, methods=["GET"])(self.read)
         app.route(os.path.join(slug, '<db_id:int>'), methods=["PUT", "PATCH"])(self.update)
         app.route(os.path.join(slug, '<db_id:int>'), methods=["DELETE"])(self.delete)
+        app.route(os.path.join(slug, 'relcount', '<db_id:int>'), methods=["GET"])(self.count_related)
+        app.route(os.path.join(slug, 'rellist', '<db_id:int>'), methods=["GET"])(self.list_related)
 
     async def create(self, request):
         async with create_engine(connection) as engine:
@@ -151,9 +157,44 @@ class CRUDFactory:
                 return jsonify({'result': 'Success' if result.rowcount else 'No matching record found.'})
 
 
+    async def count_related(self, request, db_id):
+        async with create_engine(connection) as engine:
+            async with engine.acquire() as conn:
+                rows = await conn.execute(
+                        self.related.select().where(self.related.c[self.table.name + '_id'] == db_id)
+                )
+                result = rows.rowcount
+                return jsonify({'result': result})
 
-CRUDFactory(authors_table, '/authors')
-CRUDFactory(books_table, '/books')
+    async def list_related(self, request, db_id):
+        async with create_engine(connection) as engine:
+            async with engine.acquire() as conn:
+                field_names = self.related.name.split('_')[:-1]
+                field_names.remove(self.table.name)
+                related_name = field_names.pop()
+                query_args = {
+                    'rel': related_name,
+                    'map': self.related.name,
+                    'cur': self.table.name,
+                    'db_id': str(db_id) # no need to sanitize, the type is cast explicitly
+                }
+                rows = []
+                # Quering by raw SQL here because I fucked it up during the interview
+                # It is also far more expressive and readable than SQLAlchemy native 
+                # method chaining
+                async for row in conn.execute("""SELECT {rel}.id, {rel}.name
+                                                     FROM {rel}
+                                                     LEFT JOIN {map}
+                                                            ON {rel}.id = {map}.{rel}_id
+                                                     LEFT JOIN {cur} 
+                                                            ON {cur}.id = {map}.{cur}_id
+                                                     WHERE {cur}_id = {db_id}""".format(**query_args)):
+                    rows.append({'id': row.id, 'name': row.name})
+                return jsonify({'result': rows})
+                
+
+CRUDFactory(authors_table, '/authors', related=mapping_table)
+CRUDFactory(books_table, '/books', related=mapping_table)
 
 
 @app.listener('before_server_start')
