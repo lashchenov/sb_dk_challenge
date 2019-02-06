@@ -141,6 +141,36 @@ class CRUDFactory:
         async with create_engine(connection) as engine:
             async with engine.acquire() as conn:
                 try:
+                    columns = self.related.name.split('_')[:-1]
+                    related_name = [n for n in columns if n != self.table.name].pop()
+                    related_id = request.json.pop(related_name + '_id', None)
+                    if related_id:
+                        rel_cols = [c + '_id' for c in columns]
+                        values = {self.table.name + '_id': db_id,
+                                  related_name + '_id': related_id}
+                        # select = sa.select([
+                        #         sa.literal(values[self.table.name]), sa.literal(values[related_name])
+                        #     ]).where(sa.~exists([self.related.c[]]))
+                        await conn.execute(
+                            # self.related.insert().values(**values).where(
+                            #         ~exists([self.related.c[related_name + 'id'])
+                            #         .where(self.related.c[related_name + '_id'] == related_id)
+                            #     )
+                            """INSERT INTO {rel}
+                                   ({cols})
+                               SELECT {vals}
+                               WHERE
+                                   NOT EXISTS(
+                                       SELECT {cols} FROM {rel} WHERE {fko} = {fkov} AND {fkt} = {fktv}
+                                   );
+                            """.format(rel=self.related.name,
+                                cols=', '.join(rel_cols),
+                                vals=str(values[rel_cols[0]]) + ',' + str(values[rel_cols[1]]),
+                                fko=rel_cols[0],
+                                fkov=values[rel_cols[0]],
+                                fkt=rel_cols[1],
+                                fktv=values[rel_cols[1]])
+                        )
                     row = await conn.execute(
                         self.table.update().values(**request.json).where(self.table.c.id == db_id)
                     )
