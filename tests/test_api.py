@@ -70,6 +70,17 @@ async def test_authors_fetch_books(sanic_tester: SanicTestClient):
         resp_json = await response.json()
         assert {b['id'] for b in resp_json['result']} == author_ids[i]
 
+
+async def test_authors_m2m_idempotency(sanic_tester: SanicTestClient):
+    response = None
+    for i in range(3):
+        response = await sanic_tester.put('/authors/1', data=json.dumps({'book_id': 4}))
+    book_response = await sanic_tester.get('/books/relcount/4')
+    gof_authors = await book_response.json()
+    assert response.status == 200
+    assert gof_authors['result'] == 5
+
+
 async def test_books(sanic_tester: SanicTestClient):
     response = await sanic_tester.get("/books")
     resp_json = await response.json()
@@ -132,4 +143,14 @@ async def test_books_fetch_authors(sanic_tester: SanicTestClient):
         response = await sanic_tester.get('/books/rellist/{}'.format(str(i)))
         resp_json = await response.json()
         assert {a['id'] for a in resp_json['result']} == book_ids[i]
+
+
+async def test_books_m2m_idempotency(sanic_tester: SanicTestClient):
+    response = None
+    for i in range(3):
+        response = await sanic_tester.put('/books/10', data=json.dumps({'author_id': 4}))
+    author_response = await sanic_tester.get('/authors/relcount/4')
+    author_books = await author_response.json()
+    assert response.status == 200
+    assert author_books['result'] == 2
 

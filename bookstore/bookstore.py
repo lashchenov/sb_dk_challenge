@@ -141,21 +141,16 @@ class CRUDFactory:
         async with create_engine(connection) as engine:
             async with engine.acquire() as conn:
                 try:
+                    modified = False
                     columns = self.related.name.split('_')[:-1]
                     related_name = [n for n in columns if n != self.table.name].pop()
                     related_id = request.json.pop(related_name + '_id', None)
                     if related_id:
+                        modified = True
                         rel_cols = [c + '_id' for c in columns]
                         values = {self.table.name + '_id': db_id,
                                   related_name + '_id': related_id}
-                        # select = sa.select([
-                        #         sa.literal(values[self.table.name]), sa.literal(values[related_name])
-                        #     ]).where(sa.~exists([self.related.c[]]))
                         await conn.execute(
-                            # self.related.insert().values(**values).where(
-                            #         ~exists([self.related.c[related_name + 'id'])
-                            #         .where(self.related.c[related_name + '_id'] == related_id)
-                            #     )
                             """INSERT INTO {rel}
                                    ({cols})
                                SELECT {vals}
@@ -171,13 +166,14 @@ class CRUDFactory:
                                 fkt=rel_cols[1],
                                 fktv=values[rel_cols[1]])
                         )
-                    row = await conn.execute(
-                        self.table.update().values(**request.json).where(self.table.c.id == db_id)
-                    )
-                    result = row.rowcount
+                    if request.json:
+                        row = await conn.execute(
+                            self.table.update().values(**request.json).where(self.table.c.id == db_id)
+                        )
+                        modified = modified or bool(row.rowcount)
                     return jsonify(
-                            {'result': 'Success' if result else 'No matching record found.'},
-                            status=200 if result else 404
+                        {'result': 'Success' if modified else 'No matching record found.'},
+                        status=200 if modified else 404
                     )
                 except IntegrityError:
                     return jsonify({'error': 'The supplied ID violates unique constraint.'}, status=400)
