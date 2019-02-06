@@ -49,44 +49,14 @@ books_table = sa.Table(
                 sa.Column('name', sa.String(128)),
              )
 
-# class Author(Base):
-#     __tablename__ = 'author'
-#     id = sa.Column(sa.Integer, primary_key=True)
-#     name = sa.Column(sa.String(32))
-#     books = sa.orm.relationship('Book', secondary=mapping_table, back_populates='authors')
-# 
-# 
-# class Book(Base):
-#     __tablename__ = 'book'
-#     id = sa.Column(sa.Integer, primary_key=True)
-#     name = sa.Column(sa.String(128))
-#     authors = sa.orm.relationship('Author', secondary=mapping_table, back_populates='books')
-
 
 app = Sanic(__name__)
-
-
 
 
 app.blueprint(openapi_blueprint)
 app.blueprint(swagger_blueprint)
 
 app.blueprint(health)
-
-
-
-
-# @app.route("/")
-# async def default(request):
-#     async with create_engine(connection) as engine:
-#         async with engine.acquire() as conn:
-#             books = []
-#             async for book in conn.execute(books_table.select()):
-#                 books.append(book.name)
-#             authors = []
-#             async for author in conn.execute(authors_table.select(authors_table.c.name.startswith('B'))):
-#                 authors.append(author.name)
-#             return jsonify({'result': {'authors': authors, 'books': books}})    
 
 
 class CRUDFactory:
@@ -103,12 +73,30 @@ class CRUDFactory:
         self.related = related
 
         app.route(slug, methods=["POST"])(self.create)
+        doc.summary('Creates a record by name, assigns sequential ID.')(self.create)
+        doc.consumes({"name": str})
+
         app.route(os.path.join(slug, '<db_id:int>'), methods=["GET",])(self.read)
+        doc.summary('Fetches a single record by ID or all at once')(self.read)
+        doc.produces({"result": {"id": int, "name": str}})(self.read)
+
         app.route(slug, methods=["GET"])(self.read)
+
         app.route(os.path.join(slug, '<db_id:int>'), methods=["PUT", "PATCH"])(self.update)
+        doc.summary('Updates a record by ID.')(self.update)
+        doc.consumes({"name": str, "author_id/book_id": int, "id": int})(self.update)
+
         app.route(os.path.join(slug, '<db_id:int>'), methods=["DELETE"])(self.delete)
+        doc.summary('Deletes a record by ID.')(self.delete)
+        doc.produces({"result": "Success"})(self.delete)
+
         app.route(os.path.join(slug, 'relcount', '<db_id:int>'), methods=["GET"])(self.count_related)
+        doc.summary('Counts related authors/books by ID.')(self.count_related)
+        doc.produces({"result": int})(self.count_related)
+
         app.route(os.path.join(slug, 'rellist', '<db_id:int>'), methods=["GET"])(self.list_related)
+        doc.summary('Lists related authors/books by ID.')(self.list_related)
+        doc.produces({"result": [{"id": int, "name": str}]})
 
     async def create(self, request):
         async with create_engine(connection) as engine:
@@ -176,7 +164,7 @@ class CRUDFactory:
                         status=200 if modified else 404
                     )
                 except IntegrityError:
-                    return jsonify({'error': 'The supplied ID violates unique constraint.'}, status=400)
+                    return jsonify({'error': 'Invalid ID supplied.'}, status=400)
 
     
     async def delete(self, request, db_id):
