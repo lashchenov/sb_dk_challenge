@@ -59,6 +59,19 @@ app.blueprint(swagger_blueprint)
 app.blueprint(health)
 
 
+def cors(fn):
+    """A very simple decorator to add CORS headers
+    for the local front without external plugins
+    """
+    async def wrapper(*args, **kwargs):
+        response = await fn(*args, **kwargs)
+        response.headers['Access-Control-Allow-Origin'] = 'http://localhost:8080'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
+        response.headers['Access-Control-Max-Age'] = '1200'
+        return response
+    return wrapper
+
+
 class CRUDFactory:
     """As long as both tables have the same column set
     it is possible to design a universal CRUD factory.
@@ -83,6 +96,7 @@ class CRUDFactory:
         app.route(slug, methods=["GET"])(self.read)
 
         app.route(os.path.join(slug, '<db_id:int>'), methods=["PUT", "PATCH"])(self.update)
+        app.route(os.path.join(slug, '<db_id:int>'), methods=["OPTIONS"])(self.preflight)
         doc.summary('Updates a record by ID.')(self.update)
         doc.consumes({"name": str, "author_id/book_id": int, "id": int})(self.update)
 
@@ -98,6 +112,12 @@ class CRUDFactory:
         doc.summary('Lists related authors/books by ID.')(self.list_related)
         doc.produces({"result": [{"id": int, "name": str}]})
 
+
+    @cors
+    async def preflight(self, *args, **kwargs):
+        return jsonify({'message': 'A workaround for browsers'})
+
+    @cors
     async def create(self, request):
         async with create_engine(connection) as engine:
             async with engine.acquire() as conn:
@@ -108,6 +128,7 @@ class CRUDFactory:
                 except Exception as e:
                     return jsonify({'error': str(e)})
 
+    @cors
     async def read(self, request, db_id=False):
         async with create_engine(connection) as engine:
             async with engine.acquire() as conn:
@@ -125,6 +146,7 @@ class CRUDFactory:
                     except IndexError:
                         return jsonify({'error': 'No matching record was found.'}, status=404)
     
+    @cors
     async def update(self, request, db_id):
         async with create_engine(connection) as engine:
             async with engine.acquire() as conn:
@@ -167,6 +189,7 @@ class CRUDFactory:
                     return jsonify({'error': 'Invalid ID supplied.'}, status=400)
 
     
+    @cors
     async def delete(self, request, db_id):
         async with create_engine(connection) as engine:
             async with engine.acquire() as conn:
@@ -177,6 +200,7 @@ class CRUDFactory:
                 )
 
 
+    @cors
     async def count_related(self, request, db_id):
         async with create_engine(connection) as engine:
             async with engine.acquire() as conn:
@@ -186,6 +210,8 @@ class CRUDFactory:
                 result = rows.rowcount
                 return jsonify({'result': result})
 
+
+    @cors
     async def list_related(self, request, db_id):
         async with create_engine(connection) as engine:
             async with engine.acquire() as conn:
