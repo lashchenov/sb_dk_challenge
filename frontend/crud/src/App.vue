@@ -25,6 +25,24 @@
         @refresh="fetchRows('authors'); fetchRows('books')"
       />
     </div>
+    <div class="ui inverted green button" @click="openAdd = true">
+      <i class="plus icon"/>Add
+    </div>
+    <sui-modal basic inverted v-model="openAdd">
+      <sui-modal-content>
+        <div class="ui center aligned inverted segment">
+        <div class="ui transparent inverted input">
+          <input v-model="newItem" type="text" placeholder="Star typing here...">
+        </div>
+        <div class="ui inverted green button" @click="add">
+          <i class="plus icon"/>Add
+        </div>
+        <div class="ui inverted red button" @click="openAdd = false; newItem = ''">
+          <i class="times icon"/>Cancel
+        </div>
+        </div>
+      </sui-modal-content>
+    </sui-modal>
   </div>
 </template>
 
@@ -47,10 +65,26 @@
         books: [],
         authors: [],
         loading: true,
-        visible: 'Books'
+        visible: 'Books',
+        openAdd: false,
+        newItem: ''
       }
     },
     methods: {
+      add() {
+        let xhr = new XMLHttpRequest(),
+          url = `${apiUrl}/${this.visible.toLowerCase()}`,
+          data = JSON.stringify({ name: this.newItem });
+        xhr.open('POST', url, true);
+        xhr.setRequestHeader('Content-Type', 'text/plain');
+        xhr.send(data);
+        xhr.onload = () => {
+          this.newItem = '';
+          this.fetchRows(this.visible.toLowerCase());
+          this.openAdd = false;
+        };
+        // this.openAdd = false;
+      },
       fetchRows: async function(table) {
         this.loading = true;
         let tableResponse = await fetch(`http://localhost:8000/${table}/`);
