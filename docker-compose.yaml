@@ -31,6 +31,12 @@ services:
             - postgres
         networks:
             - sanic
+    frontend:
+        build: ./frontend/crud
+        ports:
+            - "8080:8080"
+        networks:
+            - sanic
 
 volumes:
     pg-data:

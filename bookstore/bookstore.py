@@ -65,7 +65,7 @@ def cors(fn):
     """
     async def wrapper(*args, **kwargs):
         response = await fn(*args, **kwargs)
-        response.headers['Access-Control-Allow-Origin'] = 'http://localhost:8080'
+        response.headers['Access-Control-Allow-Origin'] = '*'
         response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
         response.headers['Access-Control-Max-Age'] = '1200'
         return response
