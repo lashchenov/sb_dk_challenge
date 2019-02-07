@@ -60,20 +60,20 @@ curl -X GET "http://127.0.0.1:8000/authors" -H "accept: application/json"
 ### Update
 Authors:
 ```
-curl -X PATCH "http://127.0.0.1:8000/authors/1" -H "accep --data '{"name": "D. R."}'
+curl -X PATCH "http://127.0.0.1:8000/authors/1" -H "accept --data '{"name": "D. R."}'
 ```
 or
 ```
-curl -X PUT "http://127.0.0.1:8000/authors/1" -H "accep --data '{"name": "D. R."}'
+curl -X PUT "http://127.0.0.1:8000/authors/1" -H "accept --data '{"name": "D. R."}'
 ```
 
 Books:
 ```
-curl -X PUT "http://127.0.0.1:8000/books/1" -H "accep --data '{"name": "K&R"}'
+curl -X PATCH "http://127.0.0.1:8000/books/1" -H "accept --data '{"name": "K&R"}'
 ```
 or
 ```
-curl -X PUT "http://127.0.0.1:8000/authors/1" -H "accep --data '{"name": "K&R"}'
+curl -X PUT "http://127.0.0.1:8000/authors/1" -H "accept --data '{"name": "K&R"}'
 ```
 
 ### Delete
