@@ -4,9 +4,11 @@ import asyncio
 import datetime
 
 import uvloop
+import asyncpgsa
 
 import sqlalchemy as sa
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.declarative import declarative_base
 
 from aiopg.sa import create_engine
@@ -119,124 +121,128 @@ class CRUDFactory:
 
     @cors
     async def create(self, request):
-        async with create_engine(connection) as engine:
-            async with engine.acquire() as conn:
-                result = await conn.execute(self.table.insert().values(name=request.json['name']))
-                row = await result.fetchall() 
-                try:
-                    return jsonify({'id': row[0]['id']}, status=201)
-                except Exception as e:
-                    return jsonify({'error': str(e)})
+        # async with create_engine(connection) as engine:
+        async with app.pool.acquire() as conn:
+            result = await conn.execute(self.table.insert().values(name=request.json['name']))
+            row = await result.fetchall() 
+            try:
+                return jsonify({'id': row[0]['id']}, status=201)
+            except Exception as e:
+                return jsonify({'error': str(e)})
 
     @cors
     async def read(self, request, db_id=False):
-        async with create_engine(connection) as engine:
-            async with engine.acquire() as conn:
-                if not db_id:
-                    rows = []
-                    async for row in conn.execute(self.table.select()):
-                        rows.append({'id': row.id, 'name': row.name})
-                    return jsonify({'result': rows})    
-                else:
-                    row = await conn.execute(self.table.select(self.table.c.id == db_id))
-                    result = await row.fetchall()
-                    try:
-                        row_id, name = result[0]['id'], result[0]['name']
-                        return jsonify({'result': {'id': row_id, 'name': name}})
-                    except IndexError:
-                        return jsonify({'error': 'No matching record was found.'}, status=404)
+        # async with create_engine(connection) as engine:
+        async with app.pool.acquire() as conn:
+            print('AUTHORS COUNT:') 
+            print(await conn.fetchval(sa.select([sa.func.count()]).select_from(self.table)))
+            if not db_id:
+                # rows = []
+                # async for row in conn.execute(self.table.select()):
+                #     rows.append({'id': row.id, 'name': row.name})
+                result = [dict(r) for r in await conn.fetch(authors_table.select())]
+                return jsonify({'result': result})    
+            else:
+                row = await conn.fetchrow(self.table.select(self.table.c.id == db_id))
+                return jsonify({'result': dict(row)})
+                # result = await row.fetchall()
+                # try:
+                #     row_id, name = result[0]['id'], result[0]['name']
+                #     return jsonify({'result': {'id': row_id, 'name': name}})
+                # except IndexError:
+                #         return jsonify({'error': 'No matching record was found.'}, status=404)
     
     @cors
     async def update(self, request, db_id):
-        async with create_engine(connection) as engine:
-            async with engine.acquire() as conn:
-                try:
-                    modified = False
-                    columns = self.related.name.split('_')[:-1]
-                    related_name = [n for n in columns if n != self.table.name].pop()
-                    related_id = request.json.pop(related_name + '_id', None)
-                    if related_id:
-                        modified = True
-                        rel_cols = [c + '_id' for c in columns]
-                        values = {self.table.name + '_id': db_id,
-                                  related_name + '_id': related_id}
-                        await conn.execute(
-                            """INSERT INTO {rel}
-                                   ({cols})
-                               SELECT {vals}
-                               WHERE
-                                   NOT EXISTS(
-                                       SELECT {cols} FROM {rel} WHERE {fko} = {fkov} AND {fkt} = {fktv}
-                                   );
-                            """.format(rel=self.related.name,
-                                cols=', '.join(rel_cols),
-                                vals=str(values[rel_cols[0]]) + ',' + str(values[rel_cols[1]]),
-                                fko=rel_cols[0],
-                                fkov=values[rel_cols[0]],
-                                fkt=rel_cols[1],
-                                fktv=values[rel_cols[1]])
-                        )
-                    if request.json:
-                        row = await conn.execute(
-                            self.table.update().values(**request.json).where(self.table.c.id == db_id)
-                        )
-                        modified = modified or bool(row.rowcount)
-                    return jsonify(
-                        {'result': 'Success' if modified else 'No matching record found.'},
-                        status=200 if modified else 404
+        # async with create_engine(connection) as engine:
+        async with app.pool.acquire() as conn:
+            try:
+                modified = False
+                columns = self.related.name.split('_')[:-1]
+                related_name = [n for n in columns if n != self.table.name].pop()
+                related_id = request.json.pop(related_name + '_id', None)
+                if related_id:
+                    modified = True
+                    rel_cols = [c + '_id' for c in columns]
+                    values = {self.table.name + '_id': db_id,
+                              related_name + '_id': related_id}
+                    await conn.execute(
+                        """INSERT INTO {rel}
+                               ({cols})
+                           SELECT {vals}
+                           WHERE
+                               NOT EXISTS(
+                                   SELECT {cols} FROM {rel} WHERE {fko} = {fkov} AND {fkt} = {fktv}
+                               );
+                        """.format(rel=self.related.name,
+                            cols=', '.join(rel_cols),
+                            vals=str(values[rel_cols[0]]) + ',' + str(values[rel_cols[1]]),
+                            fko=rel_cols[0],
+                            fkov=values[rel_cols[0]],
+                            fkt=rel_cols[1],
+                            fktv=values[rel_cols[1]])
                     )
-                except IntegrityError:
-                    return jsonify({'error': 'Invalid ID supplied.'}, status=400)
+                if request.json:
+                    row = await conn.execute(
+                        self.table.update().values(**request.json).where(self.table.c.id == db_id)
+                    )
+                    modified = modified or bool(row.rowcount)
+                return jsonify(
+                    {'result': 'Success' if modified else 'No matching record found.'},
+                    status=200 if modified else 404
+                )
+            except IntegrityError:
+                return jsonify({'error': 'Invalid ID supplied.'}, status=400)
 
     
     @cors
     async def delete(self, request, db_id):
-        async with create_engine(connection) as engine:
-            async with engine.acquire() as conn:
-                result = await conn.execute(self.table.delete().where(self.table.c.id == db_id))
-                return jsonify(
-                        {'result': 'Success' if result.rowcount else 'No matching record found.'},
-                        status=200 if result.rowcount else 404
-                )
+    # async with create_engine(connection) as engine:
+        async with app.pool.acquire() as conn:
+            result = await conn.execute(self.table.delete().where(self.table.c.id == db_id))
+            return jsonify(
+                    {'result': 'Success' if result.rowcount else 'No matching record found.'},
+                    status=200 if result.rowcount else 404
+            )
 
 
     @cors
     async def count_related(self, request, db_id):
-        async with create_engine(connection) as engine:
-            async with engine.acquire() as conn:
-                rows = await conn.execute(
-                        self.related.select().where(self.related.c[self.table.name + '_id'] == db_id)
-                )
-                result = rows.rowcount
-                return jsonify({'result': result})
+        # async with create_engine(connection) as engine:
+        async with app.pool.acquire() as conn:
+            rows = await conn.execute(
+                    self.related.select().where(self.related.c[self.table.name + '_id'] == db_id)
+            )
+            result = rows.rowcount
+            return jsonify({'result': result})
 
 
     @cors
     async def list_related(self, request, db_id):
-        async with create_engine(connection) as engine:
-            async with engine.acquire() as conn:
-                field_names = self.related.name.split('_')[:-1]
-                field_names.remove(self.table.name)
-                related_name = field_names.pop()
-                query_args = {
-                    'rel': related_name,
-                    'map': self.related.name,
-                    'cur': self.table.name,
-                    'db_id': str(db_id) # no need to sanitize, the type is cast explicitly
-                }
-                rows = []
-                # Quering by raw SQL here because I fucked it up during the interview
-                # It is also far more expressive and readable than SQLAlchemy native 
-                # method chaining
-                async for row in conn.execute("""SELECT {rel}.id, {rel}.name
-                                                     FROM {rel}
-                                                     LEFT JOIN {map}
-                                                            ON {rel}.id = {map}.{rel}_id
-                                                     LEFT JOIN {cur} 
-                                                            ON {cur}.id = {map}.{cur}_id
-                                                     WHERE {cur}_id = {db_id}""".format(**query_args)):
-                    rows.append({'id': row.id, 'name': row.name})
-                return jsonify({'result': rows})
+        # async with create_engine(connection) as engine:
+        async with app.pool.acquire() as conn:
+            field_names = self.related.name.split('_')[:-1]
+            field_names.remove(self.table.name)
+            related_name = field_names.pop()
+            query_args = {
+                'rel': related_name,
+                'map': self.related.name,
+                'cur': self.table.name,
+                'db_id': str(db_id) # no need to sanitize, the type is cast explicitly
+            }
+            rows = []
+            # Quering by raw SQL here because I fucked it up during the interview
+            # It is also far more expressive and readable than SQLAlchemy native 
+            # method chaining
+            async for row in conn.execute("""SELECT {rel}.id, {rel}.name
+                                                 FROM {rel}
+                                                 LEFT JOIN {map}
+                                                        ON {rel}.id = {map}.{rel}_id
+                                                 LEFT JOIN {cur} 
+                                                        ON {cur}.id = {map}.{cur}_id
+                                                 WHERE {cur}_id = {db_id}""".format(**query_args)):
+                rows.append({'id': row.id, 'name': row.name})
+            return jsonify({'result': rows})
                 
 
 CRUDFactory(authors_table, '/authors', related=mapping_table)
@@ -245,8 +251,9 @@ CRUDFactory(books_table, '/books', related=mapping_table)
 
 @app.listener('before_server_start')
 async def prepare_db(app, loop):
-    async with create_engine(connection) as engine:
-        async with engine.acquire() as conn:
+    app.pool = await asyncpgsa.create_pool(connection)
+    async with app.pool.acquire() as conn:
+        async with conn.transaction():
             await conn.execute('DROP TABLE IF EXISTS author_book_rel')
             await conn.execute('DROP TABLE IF EXISTS author')
             await conn.execute('DROP TABLE IF EXISTS book')
@@ -268,10 +275,10 @@ async def prepare_db(app, loop):
                 data = json.loads(fixture.read())
                 authors, books, mapping = (data[k] for k in ['authors', 'books', 'map'])
                 for author in authors:
-                    await conn.execute(authors_table.insert().values(name=author))
+                    await conn.execute(str(authors_table.insert().values(name=author).compile(compile_kwargs={"literal_binds": True})))
                 for book in books:
-                    await conn.execute(books_table.insert().values(name=book))
+                    await conn.execute(str(books_table.insert().values(name=book).compile(compile_kwargs={"literal_binds": True})))
                 for i, link in enumerate(mapping):
                     for book in link:
-                        await conn.execute(mapping_table.insert().values(author_id=i+1, book_id=book))
+                        await conn.execute(str(mapping_table.insert().values(author_id=i+1, book_id=book).compile(compile_kwargs={'literal_binds': True})))
 

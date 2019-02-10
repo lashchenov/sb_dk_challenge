@@ -1,4 +1,5 @@
 aiopg
+asyncpgsa
 pytest-sanic
 sanic
 sanic-openapi
