@@ -133,7 +133,7 @@ class CRUDFactory:
     async def read(self, request, db_id=False):
         async with app.pool.acquire() as conn:
             if not db_id:
-                result = [dict(r) for r in await conn.fetch(authors_table.select())]
+                result = [dict(r) for r in await conn.fetch(self.table.select())]
             else:
                 try:
                     result = dict(await conn.fetchrow(self.table.select(self.table.c.id == db_id)))
@@ -153,6 +153,8 @@ class CRUDFactory:
                     rel_cols = [c + '_id' for c in columns]
                     values = {self.table.name + '_id': db_id,
                               related_name + '_id': related_id}
+                    # Update related row in a single call preserving idempotency
+                    # using from_select()
                     select = sa.select([values[rel_cols[0]], values[rel_cols[1]]]).where(
                         ~sa.exists(self.related.c).where(
                             sa.and_(self.related.c[rel_cols[0]] == values[rel_cols[0]],
@@ -171,6 +173,8 @@ class CRUDFactory:
                             .where(self.table.c.id == db_id)
                             .returning(self.table.c.id)
                     )
+                    if not row:
+                        return jsonify({'error': 'Not found.'}, status=404)
                     modified = True
                 return jsonify(
                     {'result': 'Success' if modified else 'Relation already exists.'},
