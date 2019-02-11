@@ -1,6 +1,6 @@
 import os
 import json
-import asyncio
+import asyncpg
 import datetime
 
 import uvloop
@@ -143,7 +143,6 @@ class CRUDFactory:
     
     @cors
     async def update(self, request, db_id):
-        # async with create_engine(connection) as engine:
         async with app.pool.acquire() as conn:
             try:
                 modified = False
@@ -151,36 +150,33 @@ class CRUDFactory:
                 related_name = [n for n in columns if n != self.table.name].pop()
                 related_id = request.json.pop(related_name + '_id', None)
                 if related_id:
-                    modified = True
                     rel_cols = [c + '_id' for c in columns]
                     values = {self.table.name + '_id': db_id,
                               related_name + '_id': related_id}
-                    await conn.execute(
-                        """INSERT INTO {rel}
-                               ({cols})
-                           SELECT {vals}
-                           WHERE
-                               NOT EXISTS(
-                                   SELECT {cols} FROM {rel} WHERE {fko} = {fkov} AND {fkt} = {fktv}
-                               );
-                        """.format(rel=self.related.name,
-                            cols=', '.join(rel_cols),
-                            vals=str(values[rel_cols[0]]) + ',' + str(values[rel_cols[1]]),
-                            fko=rel_cols[0],
-                            fkov=values[rel_cols[0]],
-                            fkt=rel_cols[1],
-                            fktv=values[rel_cols[1]])
+                    select = sa.select([values[rel_cols[0]], values[rel_cols[1]]]).where(
+                        ~sa.exists(self.related.c).where(
+                            sa.and_(self.related.c[rel_cols[0]] == values[rel_cols[0]],
+                            self.related.c[rel_cols[1]] == values[rel_cols[1]])
+                        )
                     )
+                    insert = await conn.fetchval(
+                        self.related.insert()
+                            .from_select(rel_cols, select)
+                            .returning(self.related.c[related_name + '_id'])
+                    )
+                    modified = bool(insert)
                 if request.json:
-                    row = await conn.execute(
-                        self.table.update().values(**request.json).where(self.table.c.id == db_id)
+                    row = await conn.fetchval(
+                        self.table.update().values(**request.json)
+                            .where(self.table.c.id == db_id)
+                            .returning(self.table.c.id)
                     )
-                    modified = modified or bool(row.rowcount)
+                    modified = True
                 return jsonify(
-                    {'result': 'Success' if modified else 'No matching record found.'},
-                    status=200 if modified else 404
+                    {'result': 'Success' if modified else 'Relation already exists.'},
+                    status=200 if modified else 304
                 )
-            except IntegrityError:
+            except asyncpg.exceptions.ForeignKeyViolationError:
                 return jsonify({'error': 'Invalid ID supplied.'}, status=400)
 
     
