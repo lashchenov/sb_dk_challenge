@@ -210,30 +210,26 @@ class CRUDFactory:
 
     @cors
     async def list_related(self, request, db_id):
-        # async with create_engine(connection) as engine:
         async with app.pool.acquire() as conn:
             field_names = self.related.name.split('_')[:-1]
             field_names.remove(self.table.name)
             related_name = field_names.pop()
-            query_args = {
-                'rel': related_name,
-                'map': self.related.name,
-                'cur': self.table.name,
-                'db_id': str(db_id) # no need to sanitize, the type is cast explicitly
+            tables = {
+                'author': authors_table,
+                'book': books_table,
+                'mapping': mapping_table
             }
-            rows = []
-            # Quering by raw SQL here because I fucked it up during the interview
-            # It is also far more expressive and readable than SQLAlchemy native 
-            # method chaining
-            async for row in conn.execute("""SELECT {rel}.id, {rel}.name
-                                                 FROM {rel}
-                                                 LEFT JOIN {map}
-                                                        ON {rel}.id = {map}.{rel}_id
-                                                 LEFT JOIN {cur} 
-                                                        ON {cur}.id = {map}.{cur}_id
-                                                 WHERE {cur}_id = {db_id}""".format(**query_args)):
-                rows.append({'id': row.id, 'name': row.name})
-            return jsonify({'result': rows})
+            related_table = tables[related_name]
+            mapping = tables['mapping']
+
+            result = await conn.fetch(
+                sa.select([related_table.c.id, related_table.c.name]).select_from(related_table
+                    .join(mapping, related_table.c.id == mapping.c[related_name + '_id'])
+                    .join(self.table, self.table.c.id == mapping.c[self.table.name + '_id'])
+                )    
+               .where(mapping.c[self.table.name + '_id'] == db_id)
+            )
+            return jsonify({'result': [dict(r) for r in result]})
                 
 
 CRUDFactory(authors_table, '/authors', related=mapping_table)
