@@ -258,14 +258,12 @@ async def prepare_db(app, loop):
                                    book_id INTEGER REFERENCES book(id) 
                                            ON DELETE CASCADE ON UPDATE CASCADE
                                );""")
-            with open('bookstore/initial.json', 'r') as fixture:
-                data = json.loads(fixture.read())
-                authors, books, mapping = (data[k] for k in ['authors', 'books', 'map'])
-                for author in authors:
-                    await conn.execute(str(authors_table.insert().values(name=author).compile(compile_kwargs={"literal_binds": True})))
-                for book in books:
-                    await conn.execute(str(books_table.insert().values(name=book).compile(compile_kwargs={"literal_binds": True})))
-                for i, link in enumerate(mapping):
-                    for book in link:
-                        await conn.execute(str(mapping_table.insert().values(author_id=i+1, book_id=book).compile(compile_kwargs={'literal_binds': True})))
+
+            # Postgres docs suggest using COPY method for large bulk inserts,
+            # here it comes for demonstrative purposes only.
+            # ID column turned out not to auto increment on COPY that is why
+            # populating name column explicitly.
+            await conn.execute("COPY author(name) FROM '/initial_data/author'")
+            await conn.execute("COPY book(name) FROM '/initial_data/book'")
+            await conn.execute("COPY author_book_rel FROM '/initial_data/author_book_rel'")
 
