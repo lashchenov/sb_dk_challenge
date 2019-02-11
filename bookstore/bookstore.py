@@ -33,11 +33,6 @@ Session = sessionmaker()
 session = Session()
 
 
-mapping_table = sa.Table(
-                'author_book_rel', metadata,
-                sa.Column('author_id', sa.Integer, sa.ForeignKey('authors_table.id')),
-                sa.Column('book_id', sa.Integer, sa.ForeignKey('books_table.id')),
-             )
 
 authors_table = sa.Table(
                 'author', metadata,
@@ -49,6 +44,12 @@ books_table = sa.Table(
                 'book', metadata,
                 sa.Column('id', sa.Integer, primary_key=True),
                 sa.Column('name', sa.String(128)),
+             )
+
+mapping_table = sa.Table(
+                'author_book_rel', metadata,
+                sa.Column('author_id', sa.Integer, sa.ForeignKey(authors_table.c.id)),
+                sa.Column('book_id', sa.Integer, sa.ForeignKey(books_table.c.id)),
              )
 
 
@@ -121,36 +122,24 @@ class CRUDFactory:
 
     @cors
     async def create(self, request):
-        # async with create_engine(connection) as engine:
         async with app.pool.acquire() as conn:
-            result = await conn.execute(self.table.insert().values(name=request.json['name']))
-            row = await result.fetchall() 
+            result = await conn.fetchrow(self.table.insert().values(name=request.json['name'])) 
             try:
-                return jsonify({'id': row[0]['id']}, status=201)
+                return jsonify({'id': result['id']}, status=201)
             except Exception as e:
                 return jsonify({'error': str(e)})
 
     @cors
     async def read(self, request, db_id=False):
-        # async with create_engine(connection) as engine:
         async with app.pool.acquire() as conn:
-            print('AUTHORS COUNT:') 
-            print(await conn.fetchval(sa.select([sa.func.count()]).select_from(self.table)))
             if not db_id:
-                # rows = []
-                # async for row in conn.execute(self.table.select()):
-                #     rows.append({'id': row.id, 'name': row.name})
                 result = [dict(r) for r in await conn.fetch(authors_table.select())]
-                return jsonify({'result': result})    
             else:
-                row = await conn.fetchrow(self.table.select(self.table.c.id == db_id))
-                return jsonify({'result': dict(row)})
-                # result = await row.fetchall()
-                # try:
-                #     row_id, name = result[0]['id'], result[0]['name']
-                #     return jsonify({'result': {'id': row_id, 'name': name}})
-                # except IndexError:
-                #         return jsonify({'error': 'No matching record was found.'}, status=404)
+                try:
+                    result = dict(await conn.fetchrow(self.table.select(self.table.c.id == db_id)))
+                except TypeError:
+                    return jsonify({'error': 'No matching record was found.'}, status=404)
+            return jsonify({'result': result})
     
     @cors
     async def update(self, request, db_id):
@@ -197,23 +186,25 @@ class CRUDFactory:
     
     @cors
     async def delete(self, request, db_id):
-    # async with create_engine(connection) as engine:
         async with app.pool.acquire() as conn:
-            result = await conn.execute(self.table.delete().where(self.table.c.id == db_id))
+            result = await conn.fetchval(
+                self.table.delete().where(self.table.c.id == db_id).returning(self.table.c.id)
+           )
             return jsonify(
-                    {'result': 'Success' if result.rowcount else 'No matching record found.'},
-                    status=200 if result.rowcount else 404
+                {'result': 'Success' if result else 'No matching record found.'},
+                status=200 if result else 404
             )
 
 
     @cors
     async def count_related(self, request, db_id):
-        # async with create_engine(connection) as engine:
         async with app.pool.acquire() as conn:
-            rows = await conn.execute(
-                    self.related.select().where(self.related.c[self.table.name + '_id'] == db_id)
+            related_name = self.table.name + '_id'
+            result = await conn.fetchval(
+                sa.select([sa.func.count()])
+                    .select_from(self.related)
+                    .where(self.related.c[related_name] == db_id)
             )
-            result = rows.rowcount
             return jsonify({'result': result})
 
 
