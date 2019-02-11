@@ -11,16 +11,11 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.declarative import declarative_base
 
-from aiopg.sa import create_engine
-
-from psycopg2 import IntegrityError
-
 from sanic import Sanic
 from sanic.response import json as jsonify
 from sanic_openapi import swagger_blueprint, openapi_blueprint, doc
 from bookstore.blueprint.health import health
 
-# db_user = 'postgres'
 db_user = db_host = os.environ['SANIC_DB_HOST']
 db_name = os.environ['SANIC_DB_DATABASE']
 db_password = os.environ['SANIC_DB_PASSWORD']
@@ -29,9 +24,6 @@ connection = 'postgres://{u}:{up}@{h}/{hp}'.format(u=db_user, up=db_password, h=
 
 metadata = sa.MetaData()
 Base = declarative_base()
-Session = sessionmaker()
-session = Session()
-
 
 
 authors_table = sa.Table(
@@ -55,11 +47,40 @@ mapping_table = sa.Table(
 
 app = Sanic(__name__)
 
-
 app.blueprint(openapi_blueprint)
 app.blueprint(swagger_blueprint)
 
 app.blueprint(health)
+
+
+class apg:
+    """
+    Reusable asyncpgsa wrappers to reduce
+    the amount of boilerplate wrappers.
+    Handles acquiring a connection from pool
+    for each call.
+    """
+    def __init__(self, pool):
+        self.pool = pool
+
+    async def fetch(self, *args, **kwargs):
+        async with self.pool.acquire() as conn:
+            return await conn.fetch(*args, **kwargs)
+
+    async def fetchrow(self, *args, **kwargs):
+        async with self.pool.acquire() as conn:
+            return await conn.fetchrow(*args, **kwargs)
+
+    async def fetchval(self, *args, **kwargs):
+        async with self.pool.acquire() as conn:
+            return await conn.fetchval(*args, **kwargs)
+
+    async def execute(self, *args, **kwargs):
+        async with self.pool.acquire() as conn:
+            return await conn.execute(*args, **kwargs)
+
+
+
 
 
 def cors(fn):
@@ -122,114 +143,108 @@ class CRUDFactory:
 
     @cors
     async def create(self, request):
-        async with app.pool.acquire() as conn:
-            result = await conn.fetchrow(self.table.insert().values(name=request.json['name'])) 
-            try:
-                return jsonify({'id': result['id']}, status=201)
-            except Exception as e:
-                return jsonify({'error': str(e)})
+        result = await app.apg.fetchrow(self.table.insert().values(name=request.json['name'])) 
+        try:
+            return jsonify({'id': result['id']}, status=201)
+        except Exception as e:
+            return jsonify({'error': str(e)})
 
     @cors
     async def read(self, request, db_id=False):
-        async with app.pool.acquire() as conn:
-            if not db_id:
-                result = [dict(r) for r in await conn.fetch(self.table.select())]
-            else:
-                try:
-                    result = dict(await conn.fetchrow(self.table.select(self.table.c.id == db_id)))
-                except TypeError:
-                    return jsonify({'error': 'No matching record was found.'}, status=404)
-            return jsonify({'result': result})
+        if not db_id:
+            result = [dict(r) for r in await app.apg.fetch(self.table.select())]
+        else:
+            try:
+                result = dict(await app.apg.fetchrow(self.table.select(self.table.c.id == db_id)))
+            except TypeError:
+                return jsonify({'error': 'No matching record was found.'}, status=404)
+        return jsonify({'result': result})
     
     @cors
     async def update(self, request, db_id):
-        async with app.pool.acquire() as conn:
-            try:
-                modified = False
-                columns = self.related.name.split('_')[:-1]
-                related_name = [n for n in columns if n != self.table.name].pop()
-                related_id = request.json.pop(related_name + '_id', None)
-                if related_id:
-                    rel_cols = [c + '_id' for c in columns]
-                    values = {self.table.name + '_id': db_id,
-                              related_name + '_id': related_id}
-                    # Update related row in a single call preserving idempotency
-                    # using from_select()
-                    select = sa.select([values[rel_cols[0]], values[rel_cols[1]]]).where(
-                        ~sa.exists(self.related.c).where(
-                            sa.and_(self.related.c[rel_cols[0]] == values[rel_cols[0]],
-                            self.related.c[rel_cols[1]] == values[rel_cols[1]])
-                        )
+        try:
+            modified = False
+            columns = self.related.name.split('_')[:-1]
+            related_name = [n for n in columns if n != self.table.name].pop()
+            related_id = request.json.pop(related_name + '_id', None)
+            if related_id:
+                rel_cols = [c + '_id' for c in columns]
+                values = {self.table.name + '_id': db_id,
+                          related_name + '_id': related_id}
+                # Update related row in a single call preserving idempotency
+                # using from_select()
+                select = sa.select([values[rel_cols[0]], values[rel_cols[1]]]).where(
+                    ~sa.exists(self.related.c).where(
+                        sa.and_(self.related.c[rel_cols[0]] == values[rel_cols[0]],
+                        self.related.c[rel_cols[1]] == values[rel_cols[1]])
                     )
-                    insert = await conn.fetchval(
-                        self.related.insert()
-                            .from_select(rel_cols, select)
-                            .returning(self.related.c[related_name + '_id'])
-                    )
-                    modified = bool(insert)
-                if request.json:
-                    row = await conn.fetchval(
-                        self.table.update().values(**request.json)
-                            .where(self.table.c.id == db_id)
-                            .returning(self.table.c.id)
-                    )
-                    if not row:
-                        return jsonify({'error': 'Not found.'}, status=404)
-                    modified = True
-                return jsonify(
-                    {'result': 'Success' if modified else 'Relation already exists.'},
-                    status=200 if modified else 304
                 )
-            except asyncpg.exceptions.ForeignKeyViolationError:
-                return jsonify({'error': 'Invalid ID supplied.'}, status=400)
+                insert = await app.apg.fetchval(
+                    self.related.insert()
+                        .from_select(rel_cols, select)
+                        .returning(self.related.c[related_name + '_id'])
+                )
+                modified = bool(insert)
+            if request.json:
+                row = await app.apg.fetchval(
+                    self.table.update().values(**request.json)
+                        .where(self.table.c.id == db_id)
+                        .returning(self.table.c.id)
+                )
+                if not row:
+                    return jsonify({'error': 'Not found.'}, status=404)
+                modified = True
+            return jsonify(
+                {'result': 'Success' if modified else 'Relation already exists.'},
+                status=200 if modified else 304
+            )
+        except asyncpg.exceptions.ForeignKeyViolationError:
+            return jsonify({'error': 'Invalid ID supplied.'}, status=400)
 
     
     @cors
     async def delete(self, request, db_id):
-        async with app.pool.acquire() as conn:
-            result = await conn.fetchval(
-                self.table.delete().where(self.table.c.id == db_id).returning(self.table.c.id)
-           )
-            return jsonify(
-                {'result': 'Success' if result else 'No matching record found.'},
-                status=200 if result else 404
-            )
+        result = await app.apg.fetchval(
+            self.table.delete().where(self.table.c.id == db_id).returning(self.table.c.id)
+       )
+        return jsonify(
+            {'result': 'Success' if result else 'No matching record found.'},
+            status=200 if result else 404
+        )
 
 
     @cors
     async def count_related(self, request, db_id):
-        async with app.pool.acquire() as conn:
-            related_name = self.table.name + '_id'
-            result = await conn.fetchval(
-                sa.select([sa.func.count()])
-                    .select_from(self.related)
-                    .where(self.related.c[related_name] == db_id)
-            )
-            return jsonify({'result': result})
+        related_name = self.table.name + '_id'
+        result = await app.apg.fetchval(
+            sa.select([sa.func.count()])
+                .select_from(self.related)
+                .where(self.related.c[related_name] == db_id)
+        )
+        return jsonify({'result': result})
 
 
     @cors
     async def list_related(self, request, db_id):
-        async with app.pool.acquire() as conn:
-            field_names = self.related.name.split('_')[:-1]
-            field_names.remove(self.table.name)
-            related_name = field_names.pop()
-            tables = {
-                'author': authors_table,
-                'book': books_table,
-                'mapping': mapping_table
-            }
-            related_table = tables[related_name]
-            mapping = tables['mapping']
+        field_names = self.related.name.split('_')[:-1]
+        field_names.remove(self.table.name)
+        related_name = field_names.pop()
+        tables = {
+            'author': authors_table,
+            'book': books_table,
+            'mapping': mapping_table
+        }
+        related_table = tables[related_name]
+        mapping = tables['mapping']
 
-            result = await conn.fetch(
-                sa.select([related_table.c.id, related_table.c.name]).select_from(related_table
-                    .join(mapping, related_table.c.id == mapping.c[related_name + '_id'])
-                    .join(self.table, self.table.c.id == mapping.c[self.table.name + '_id'])
-                )    
-               .where(mapping.c[self.table.name + '_id'] == db_id)
-            )
-            return jsonify({'result': [dict(r) for r in result]})
+        result = await app.apg.fetch(
+            sa.select([related_table.c.id, related_table.c.name]).select_from(related_table
+                .join(mapping, related_table.c.id == mapping.c[related_name + '_id'])
+                .join(self.table, self.table.c.id == mapping.c[self.table.name + '_id'])
+            )    
+           .where(mapping.c[self.table.name + '_id'] == db_id)
+        )
+        return jsonify({'result': [dict(r) for r in result]})
                 
 
 CRUDFactory(authors_table, '/authors', related=mapping_table)
@@ -238,8 +253,15 @@ CRUDFactory(books_table, '/books', related=mapping_table)
 
 @app.listener('before_server_start')
 async def prepare_db(app, loop):
-    app.pool = await asyncpgsa.create_pool(connection)
-    async with app.pool.acquire() as conn:
+    # Declare asynchronous Postgres (apg) app-wide
+    pool = await asyncpgsa.create_pool(connection)
+    app.apg = apg(pool)
+
+    # Wrapping multiple DB setting up statements in a single transaction
+    # so not yet using app.apg
+    # As long as this is the only use case of a transaction wrapping
+    # not implementing it in the apg class.
+    async with pool.acquire() as conn:
         async with conn.transaction():
             await conn.execute('DROP TABLE IF EXISTS author_book_rel')
             await conn.execute('DROP TABLE IF EXISTS author')

@@ -1,4 +1,3 @@
-aiopg
 asyncpgsa
 pytest-sanic
 sanic
